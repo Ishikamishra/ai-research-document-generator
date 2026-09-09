@@ -1,12 +1,20 @@
 import streamlit as st
-import ollama
-from duckduckgo_search import DDGS
 from docx import Document
-from docx.shared import Pt
-from docx.enum.text import WD_ALIGN_PARAGRAPH
 from datetime import datetime
 import os
 import io
+from config import Config
+from ai_provider import get_ai_provider
+from docx_formatting import (
+    CONTENT_KEYS,
+    SECTION_TITLES,
+    add_news_sources,
+    add_section,
+    add_table_of_contents,
+    add_title_page,
+    configure_document,
+)
+from news_search import search_recent_news as fetch_recent_news
 
 # Page config
 st.set_page_config(
@@ -14,6 +22,43 @@ st.set_page_config(
     page_icon="📊",
     layout="wide"
 )
+
+# Display configuration info in sidebar (optional debug info)
+with st.sidebar:
+    st.subheader("🤖 AI Provider Selection")
+    
+    # Provider selector
+    provider_options = {
+        "Claude (claude-3-haiku)": "claude",
+        "OpenAI (gpt-4o-mini)": "openai",
+        "Gemini (gemini-3.6-flash)": "gemini"
+    }
+    
+    selected_label = st.selectbox(
+        "Choose AI Provider:",
+        options=list(provider_options.keys()),
+        index=list(provider_options.values()).index(Config.AI_PROVIDER) if Config.AI_PROVIDER in provider_options.values() else 2
+    )
+    selected_provider = provider_options[selected_label]
+    
+    # Show API key status
+    st.markdown("**API Key Status:**")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        status = "✅" if Config.CLAUDE_API_KEY else "❌"
+        st.metric("Claude", status)
+    with col2:
+        status = "✅" if Config.OPENAI_API_KEY else "❌"
+        st.metric("OpenAI", status)
+    with col3:
+        status = "✅" if Config.GEMINI_API_KEY else "❌"
+        st.metric("Gemini", status)
+    
+    if st.checkbox("🔧 Show Configuration", value=False):
+        st.subheader("Current Configuration")
+        config_info = Config.display_config()
+        for key, value in config_info.items():
+            st.code(f"{key}: {value}")
 
 # Title
 st.title("📊 AI Research Document Generator")
@@ -32,7 +77,7 @@ with st.sidebar:
     - Sales AI Automation Challenges
     - Recent News & Developments
     
-    **Powered by:** Ollama (Local AI) + Web Search
+    **Powered by:** Claude, OpenAI, or Gemini APIs + DuckDuckGo Search
     """)
     
     st.header("📝 Instructions")
@@ -50,98 +95,22 @@ company_name = st.text_input(
     help="Enter the name of the company you want to research"
 )
 
-def search_recent_news(company_name, max_results=5):
+def search_recent_news(company_name, max_results=None):
     """Search for recent news using DuckDuckGo"""
+    if max_results is None:
+        max_results = Config.MAX_NEWS_RESULTS
+    
     try:
-        query = f"{company_name} news 2026"
-        
-        with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=max_results))
-        
-        news_items = []
-        for result in results[:5]:
-            news_items.append({
-                'title': result.get('title', 'No title'),
-                'url': result.get('href', 'No URL'),
-                'snippet': result.get('body', 'No snippet')
-            })
-        
-        return news_items
+        return fetch_recent_news(company_name, max_results=max_results)
     except Exception as e:
         st.error(f"News search failed: {str(e)}")
         return []
 
-def generate_with_ai(section, company_name, recent_news=None):
-    """Generate content using Ollama"""
-    
-    prompts = {
-        'overview': f"""Write a professional company overview for {company_name} (200-250 words).
-        Include:
-        - What the company does
-        - Industry and sector
-        - Headquarters location
-        - Year founded
-        - Key business areas
-        - Company size (employees)
-        
-        Write in professional business language.""",
-        
-        'products': f"""List the key products and services offered by {company_name}.
-        Format as bullet points with brief descriptions.
-        Include 5-7 main products/services.
-        For each product, mention:
-        - Product name
-        - What it does
-        - Target customers
-        
-        Write in professional business language.""",
-        
-        'market': f"""Describe {company_name}'s market position and competitive landscape (200-250 words).
-        Include:
-        - Market share and ranking
-        - Main competitors (name 3-5 competitors)
-        - Target customer segments
-        - Competitive advantages
-        - Market trends affecting the company
-        
-        Write in professional business language.""",
-        
-        'sales': f"""Describe {company_name}'s sales position and strategy (200-250 words).
-        Include:
-        - Annual revenue (if known) or revenue range
-        - Sales channels (direct, partners, online, etc.)
-        - Sales strategy approach
-        - Key sales markets/regions
-        - Sales performance trends
-        - Customer acquisition approach
-        
-        Write in professional business language.""",
-        
-        'challenges': f"""Analyze challenges in sales AI automation for {company_name} (250-300 words).
-        Include:
-        - Current AI adoption level in sales
-        - Key challenges in implementing AI automation
-        - Specific sales processes that need automation
-        - Technology gaps or limitations
-        - Data and integration challenges
-        - Change management and adoption barriers
-        - Recommendations for improvement
-        
-        Write in professional business language with actionable insights.""",
-        
-        'news_summary': f"""Based on these recent news items about {company_name}, write a brief summary (150 words):
-        
-        {recent_news}
-        
-        Summarize the key developments and trends. Write in professional business language."""
-    }
-    
+def generate_with_ai(section, company_name, recent_news=None, provider=None):
+    """Generate content using configured AI provider"""
     try:
-        response = ollama.chat(
-            model='llama3.2',
-            messages=[{'role': 'user', 'content': prompts[section]}]
-        )
-        return response['message']['content']
+        ai_provider = get_ai_provider(provider)
+        return ai_provider.generate_content(section, company_name, recent_news)
     except Exception as e:
         return f"Error generating {section}: {str(e)}"
 
@@ -149,49 +118,13 @@ def create_word_document(company_name, content, recent_news):
     """Create Word document and return as bytes"""
     
     doc = Document()
-    
-    # Title
-    title = doc.add_heading(f"{company_name}", 0)
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    
-    subtitle = doc.add_paragraph("Research Document")
-    subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    subtitle.style.font.size = Pt(16)
-    subtitle.style.font.bold = True
-    
-    doc.add_paragraph(f"\nGenerated: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}")
-    doc.add_paragraph("Prepared by: AI Research Document Generator")
-    doc.add_paragraph("_" * 50)
-    
-    # Sections
-    doc.add_heading("1. Company Overview", level=1)
-    doc.add_paragraph(content.get('overview', 'N/A'))
-    
-    doc.add_heading("2. Products & Services", level=1)
-    doc.add_paragraph(content.get('products', 'N/A'))
-    
-    doc.add_heading("3. Market Position", level=1)
-    doc.add_paragraph(content.get('market', 'N/A'))
-    
-    doc.add_heading("4. Sales Position", level=1)
-    doc.add_paragraph(content.get('sales', 'N/A'))
-    
-    doc.add_heading("5. Challenges in Sales AI Automation", level=1)
-    doc.add_paragraph(content.get('challenges', 'N/A'))
-    
-    doc.add_heading("6. Recent News & Developments", level=1)
-    doc.add_paragraph(content.get('news_summary', 'N/A'))
-    
-    if recent_news:
-        doc.add_heading("Recent News Sources:", level=2)
-        for i, news in enumerate(recent_news, 1):
-            p = doc.add_paragraph()
-            p.add_run(f"{i}. ").bold = True
-            p.add_run(news.get('title', 'No title'))
-            p.add_run(f"\n   URL: {news.get('url', 'N/A')}\n")
-    
-    doc.add_paragraph("\n" + "_" * 50)
-    doc.add_paragraph("Generated by AI Research Document Generator")
+
+    configure_document(doc)
+    add_title_page(doc, company_name)
+    add_table_of_contents(doc)
+    for number, (title, key) in enumerate(zip(SECTION_TITLES, CONTENT_KEYS), 1):
+        add_section(doc, number, title, content.get(key, "N/A"))
+    add_news_sources(doc, recent_news)
     
     # Save to bytes
     buffer = io.BytesIO()
@@ -219,24 +152,24 @@ if st.button("🚀 Generate Research Document", type="primary"):
                 # Step 2-6: Generate content
                 status_text.text("Step 2/6: Generating company overview...")
                 content = {}
-                content['overview'] = generate_with_ai('overview', company_name)
+                content['overview'] = generate_with_ai('overview', company_name, provider=selected_provider)
                 progress_bar.progress(30)
                 
                 status_text.text("Step 3/6: Generating products & services...")
-                content['products'] = generate_with_ai('products', company_name)
+                content['products'] = generate_with_ai('products', company_name, provider=selected_provider)
                 progress_bar.progress(45)
                 
                 status_text.text("Step 4/6: Generating market position...")
-                content['market'] = generate_with_ai('market', company_name)
+                content['market'] = generate_with_ai('market', company_name, provider=selected_provider)
                 progress_bar.progress(60)
                 
                 status_text.text("Step 5/6: Generating sales position...")
-                content['sales'] = generate_with_ai('sales', company_name)
+                content['sales'] = generate_with_ai('sales', company_name, provider=selected_provider)
                 progress_bar.progress(75)
                 
                 status_text.text("Step 6/6: Generating AI challenges & news summary...")
-                content['challenges'] = generate_with_ai('challenges', company_name)
-                content['news_summary'] = generate_with_ai('news_summary', company_name, recent_news)
+                content['challenges'] = generate_with_ai('challenges', company_name, provider=selected_provider)
+                content['news_summary'] = generate_with_ai('news_summary', company_name, recent_news, provider=selected_provider)
                 progress_bar.progress(100)
                 
                 status_text.text("✅ Creating document...")
@@ -269,8 +202,8 @@ if st.button("🚀 Generate Research Document", type="primary"):
                 
             except Exception as e:
                 st.error(f"❌ Error: {str(e)}")
-                st.error("Make sure Ollama is running and llama3.2 model is installed.")
+                st.error("Please check that your API key for the selected provider is configured in .env")
 
 # Footer
 st.markdown("---")
-st.markdown("**Built with ❤️ using Streamlit, Ollama, and DuckDuckGo Search**")
+st.markdown("**Built with ❤️ using Streamlit, Claude/OpenAI/Gemini APIs, and DuckDuckGo Search**")
