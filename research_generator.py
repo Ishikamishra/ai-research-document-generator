@@ -1,36 +1,42 @@
-import ollama
-from duckduckgo_search import DDGS
 from docx import Document
-from docx.shared import Pt, Inches
-from docx.enum.text import WD_ALIGN_PARAGRAPH
 from datetime import datetime
 import time
+from config import Config
+from ai_provider import get_ai_provider
+from news_search import search_recent_news as fetch_recent_news
+from docx_formatting import (
+    CONTENT_KEYS,
+    SECTION_TITLES,
+    add_news_sources,
+    add_section,
+    add_table_of_contents,
+    add_title_page,
+    configure_document,
+)
 
 class ResearchDocumentGenerator:
-    def _init_(self):
+    def __init__(self, provider=None):
         self.company_name = ""
         self.content = {}
         self.recent_news = []
+        
+        # Initialize AI provider
+        try:
+            self.ai_provider = get_ai_provider(provider)
+            print(f"✓ Using {self.ai_provider.provider_name} ({self.ai_provider.model})")
+        except ValueError as e:
+            print(f"❌ {str(e)}")
+            raise
     
-    def search_recent_news(self, company_name, max_results=5):
+    def search_recent_news(self, company_name, max_results=None):
         """Search for recent news using DuckDuckGo"""
+        if max_results is None:
+            max_results = Config.MAX_NEWS_RESULTS
+        
         print(f"🔍 Searching recent news for {company_name}...")
         
         try:
-            # Search for recent news
-            query = f"{company_name} news 2026"
-            
-            with DDGS() as ddgs:
-                results = list(ddgs.text(query, max_results=max_results))
-            
-            news_items = []
-            for result in results[:5]:
-                news_items.append({
-                    'title': result.get('title', 'No title'),
-                    'url': result.get('href', 'No URL'),
-                    'snippet': result.get('body', 'No snippet')
-                })
-            
+            news_items = fetch_recent_news(company_name, max_results=max_results)
             self.recent_news = news_items
             return news_items
         except Exception as e:
@@ -38,78 +44,8 @@ class ResearchDocumentGenerator:
             return []
     
     def generate_with_ai(self, section, company_name):
-        """Generate content using Ollama"""
-        
-        prompts = {
-            'overview': f"""Write a professional company overview for {company_name} (200-250 words).
-            Include:
-            - What the company does
-            - Industry and sector
-            - Headquarters location
-            - Year founded
-            - Key business areas
-            - Company size (employees)
-            
-            Write in professional business language.""",
-            
-            'products': f"""List the key products and services offered by {company_name}.
-            Format as bullet points with brief descriptions.
-            Include 5-7 main products/services.
-            For each product, mention:
-            - Product name
-            - What it does
-            - Target customers
-            
-            Write in professional business language.""",
-            
-            'market': f"""Describe {company_name}'s market position and competitive landscape (200-250 words).
-            Include:
-            - Market share and ranking
-            - Main competitors (name 3-5 competitors)
-            - Target customer segments
-            - Competitive advantages
-            - Market trends affecting the company
-            
-            Write in professional business language.""",
-            
-            'sales': f"""Describe {company_name}'s sales position and strategy (200-250 words).
-            Include:
-            - Annual revenue (if known) or revenue range
-            - Sales channels (direct, partners, online, etc.)
-            - Sales strategy approach
-            - Key sales markets/regions
-            - Sales performance trends
-            - Customer acquisition approach
-            
-            Write in professional business language.""",
-            
-            'challenges': f"""Analyze challenges in sales AI automation for {company_name} (250-300 words).
-            Include:
-            - Current AI adoption level in sales
-            - Key challenges in implementing AI automation
-            - Specific sales processes that need automation
-            - Technology gaps or limitations
-            - Data and integration challenges
-            - Change management and adoption barriers
-            - Recommendations for improvement
-            
-            Write in professional business language with actionable insights.""",
-            
-            'news_summary': f"""Based on these recent news items about {company_name}, write a brief summary (150 words):
-            
-            {self.recent_news}
-            
-            Summarize the key developments and trends. Write in professional business language."""
-        }
-        
-        try:
-            response = ollama.chat(
-                model='llama3.2',
-                messages=[{'role': 'user', 'content': prompts[section]}]
-            )
-            return response['message']['content']
-        except Exception as e:
-            return f"Error generating {section}: {str(e)}"
+        """Generate content using configured AI provider"""
+        return self.ai_provider.generate_content(section, company_name, self.recent_news)
     
     def generate_research(self, company_name):
         """Generate complete research document"""
@@ -121,7 +57,7 @@ class ResearchDocumentGenerator:
         print("=" * 50)
         
         # Step 1: Search recent news (real-time)
-        self.search_recent_news(company_name, max_results=5)
+        self.search_recent_news(company_name, max_results=Config.MAX_NEWS_RESULTS)
         
         # Step 2: Generate AI content (local, no limits)
         print("📝 Generating company overview...")
@@ -149,82 +85,30 @@ class ResearchDocumentGenerator:
     
     def create_word_document(self, output_filename=None):
         """Create professional Word document"""
+        import os
         
         if not output_filename:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             output_filename = f"{self.company_name.replace(' ', '')}_Research{timestamp}.docx"
         
-        print(f"\n📄 Creating Word document: {output_filename}")
+        # Use configured output directory
+        output_path = os.path.join(Config.OUTPUT_DIR, output_filename)
+        os.makedirs(Config.OUTPUT_DIR, exist_ok=True)
+        
+        print(f"\n📄 Creating Word document: {output_path}")
         
         doc = Document()
+        configure_document(doc)
+        add_title_page(doc, self.company_name)
+        add_table_of_contents(doc)
+        for number, (title, key) in enumerate(zip(SECTION_TITLES, CONTENT_KEYS), 1):
+            add_section(doc, number, title, self.content.get(key, "N/A"))
+        add_news_sources(doc, self.recent_news)
         
-        # Title Page
-        title = doc.add_heading(f"{self.company_name}", 0)
-        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        doc.save(output_path)
+        print(f"✅ Document saved: {output_path}")
         
-        subtitle = doc.add_paragraph("Research Document")
-        subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        subtitle.style.font.size = Pt(16)
-        subtitle.style.font.bold = True
-        
-        doc.add_paragraph(f"\nGenerated: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}")
-        doc.add_paragraph("Prepared by: AI Research Document Generator")
-        doc.add_paragraph("_" * 50)
-        
-        # Table of Contents
-        doc.add_heading("Table of Contents", level=1)
-        doc.add_paragraph("1. Company Overview")
-        doc.add_paragraph("2. Products & Services")
-        doc.add_paragraph("3. Market Position")
-        doc.add_paragraph("4. Sales Position")
-        doc.add_paragraph("5. Challenges in Sales AI Automation")
-        doc.add_paragraph("6. Recent News & Developments")
-        doc.add_page_break()
-        
-        # Section 1: Company Overview
-        doc.add_heading("1. Company Overview", level=1)
-        doc.add_paragraph(self.content.get('overview', 'N/A'))
-        
-        # Section 2: Products & Services
-        doc.add_heading("2. Products & Services", level=1)
-        doc.add_paragraph(self.content.get('products', 'N/A'))
-        
-        # Section 3: Market Position
-        doc.add_heading("3. Market Position", level=1)
-        doc.add_paragraph(self.content.get('market', 'N/A'))
-        
-        # Section 4: Sales Position
-        doc.add_heading("4. Sales Position", level=1)
-        doc.add_paragraph(self.content.get('sales', 'N/A'))
-        
-        # Section 5: Challenges in Sales AI Automation
-        doc.add_heading("5. Challenges in Sales AI Automation", level=1)
-        doc.add_paragraph(self.content.get('challenges', 'N/A'))
-        
-        # Section 6: Recent News
-        doc.add_heading("6. Recent News & Developments", level=1)
-        
-        # News summary
-        doc.add_paragraph(self.content.get('news_summary', 'N/A'))
-        
-        # Recent news items
-        if self.recent_news:
-            doc.add_heading("Recent News Sources:", level=2)
-            for i, news in enumerate(self.recent_news, 1):
-                p = doc.add_paragraph()
-                p.add_run(f"{i}. ").bold = True
-                p.add_run(news.get('title', 'No title'))
-                p.add_run(f"\n   URL: {news.get('url', 'N/A')}\n")
-                p.add_run(f"   {news.get('snippet', '')[:200]}...")
-        
-        doc.add_paragraph("\n" + "_" * 50)
-        doc.add_paragraph("Generated by AI Research Document Generator (Ollama + Web Search)")
-        doc.add_paragraph("This document combines AI-generated insights with real-time web data.")
-        
-        doc.save(output_filename)
-        print(f"✅ Document saved: {output_filename}")
-        
-        return output_filename
+        return output_path
     
     def run(self, company_name):
         """Run complete research workflow"""
@@ -237,7 +121,7 @@ class ResearchDocumentGenerator:
 if __name__ == "__main__":
     print("=" * 60)
     print("AI Research Document Generator")
-    print("Powered by Ollama (Local AI) + Web Search")
+    print("Powered by Claude, OpenAI, or Gemini + Web Search")
     print("=" * 60)
     
     generator = ResearchDocumentGenerator()
