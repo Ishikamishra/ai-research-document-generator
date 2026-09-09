@@ -28,6 +28,5 @@ Thumbs.db
 *.docx
 output_documents/
 
-# Config
-config.py
+# Local secrets
 .env
