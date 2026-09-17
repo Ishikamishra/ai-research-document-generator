@@ -24,65 +24,141 @@ class AIProvider(ABC):
     def _get_prompts(self, company_name: str, recent_news: Optional[List[Dict]] = None) -> Dict[str, str]:
         """Get standardized prompts for all sections"""
         return {
-            'overview': f"""Write a professional company overview for {company_name} (200-250 words).
+            'executive_summary': f"""Write a concise executive summary for {company_name} (150-200 words).
+Include:
+- Brief company introduction
+- Key business highlights
+- Market position summary
+- Strategic focus areas
+- Major achievements or differentiators
+
+Write in professional business language suitable for C-level executives.""",
+            
+            'company_overview': f"""Write a comprehensive company overview for {company_name} (250-300 words).
 Include:
 - What the company does
 - Industry and sector
 - Headquarters location
 - Year founded
-- Key business areas
-- Company size (employees)
+- Founder/CEO (if known)
+- Company size (employees, revenue if known)
+- Global presence and operations
+- Mission and vision
 
 Write in professional business language.""",
             
-            'products': f"""List the key products and services offered by {company_name}.
-Format as bullet points with brief descriptions.
-Include 5-7 main products/services.
-For each product, mention:
-- Product name
-- What it does
-- Target customers
-
-Write in professional business language.""",
-            
-            'market': f"""Describe {company_name}'s market position and competitive landscape (200-250 words).
+            'business_segments': f"""Describe the business segments and brands of {company_name} (250-300 words).
 Include:
-- Market share and ranking
-- Main competitors (name 3-5 competitors)
-- Target customer segments
-- Competitive advantages
-- Market trends affecting the company
+- Main business divisions/segments
+- Key brands and product lines
+- Revenue contribution by segment (if known)
+- Target markets for each segment
+- Brand positioning and strategy
+
+Format with clear sections and bullet points where appropriate.
+Write in professional business language.""",
+            
+            'sales_distribution': f"""Analyze the sales and distribution model of {company_name} (250-300 words).
+Include:
+- Sales channels (direct, indirect, online, retail, etc.)
+- Distribution network and partnerships
+- Geographic sales distribution
+- Key customers or client segments
+- Sales strategy and approach
+- Distribution strengths and capabilities
 
 Write in professional business language.""",
             
-            'sales': f"""Describe {company_name}'s sales position and strategy (200-250 words).
+            'gcc_market': f"""Analyze the GCC (Gulf Cooperation Council) market for {company_name} (300-350 words).
 Include:
-- Annual revenue (if known) or revenue range
-- Sales channels (direct, partners, online, etc.)
-- Sales strategy approach
-- Key sales markets/regions
-- Sales performance trends
-- Customer acquisition approach
+- GCC market size and presence
+- Market growth trends
+- CAGR (Compound Annual Growth Rate) if available
+- Key GCC markets (UAE, Saudi Arabia, Qatar, etc.)
+- Market opportunities in the region
+- Competitive landscape in GCC
+- Growth drivers and challenges
 
-Write in professional business language.""",
+Write in professional business language with data-driven insights.""",
             
-            'challenges': f"""Analyze challenges in sales AI automation for {company_name} (250-300 words).
-Include:
-- Current AI adoption level in sales
-- Key challenges in implementing AI automation
-- Specific sales processes that need automation
-- Technology gaps or limitations
-- Data and integration challenges
-- Change management and adoption barriers
-- Recommendations for improvement
+            'ai_transformation': f"""Analyze AI and digital transformation initiatives for {company_name} (300-350 words).
+Focus on:
+- AI adoption in sales processes
+- Digital transformation in distribution
+- AI-powered retail initiatives
+- Automation in customer engagement
+- Digital tools and platforms used
+- Impact on efficiency and customer experience
+- Future AI/digital roadmap
 
 Write in professional business language with actionable insights.""",
             
-            'news_summary': f"""Based on these recent news items about {company_name}, write a brief summary (150 words):
+            'tech_stack': f"""Describe the current technology stack of {company_name} (250-300 words).
+Include:
+- Core enterprise systems (ERP, CRM, etc.)
+- Sales and marketing technologies
+- E-commerce and digital platforms
+- Data and analytics tools
+- Cloud infrastructure
+- Integration and API capabilities
+- Technology partnerships
+
+Write in professional business language.""",
+            
+            'strategic_transformation': f"""Outline strategic transformation and future planning for {company_name} (300-350 words).
+Include:
+- Strategic priorities and goals
+- Transformation initiatives underway
+- Future growth plans
+- Innovation focus areas
+- Market expansion strategies
+- Sustainability and ESG initiatives
+- Long-term vision (3-5 years)
+
+Write in professional business language with strategic insights.""",
+            
+            'news_timeline': f"""Based on these recent news items about {company_name}, create a timeline summary (200-250 words):
 
 {self._format_news(recent_news)}
 
-Summarize the key developments and trends. Write in professional business language."""
+Organize by date if possible. Highlight:
+- Major announcements
+- Product launches
+- Partnerships or acquisitions
+- Market expansions
+- Leadership changes
+- Financial results
+
+Write in professional business language.""",
+            
+            'key_insights': f"""Provide key insights on growth opportunities and challenges for {company_name} (300-350 words).
+Include:
+
+GROWTH OPPORTUNITIES:
+- Market expansion opportunities
+- Untapped customer segments
+- Product/service innovation areas
+- Strategic partnership possibilities
+- Emerging market trends to leverage
+
+CHALLENGES:
+- Competitive pressures
+- Market headwinds
+- Operational challenges
+- Technology gaps
+- Regulatory or compliance issues
+
+Write in professional business language with actionable recommendations.""",
+            
+            'conclusion': f"""Write a comprehensive conclusion for {company_name} research (200-250 words).
+Include:
+- Summary of company strengths
+- Key competitive advantages
+- Strategic positioning
+- Outlook for future growth
+- Final recommendations for stakeholders
+
+Write in professional business language suitable for executive presentation."""
         }
     
     def _format_news(self, recent_news: Optional[List[Dict]]) -> str:
@@ -94,7 +170,8 @@ Summarize the key developments and trends. Write in professional business langua
         for i, news in enumerate(recent_news, 1):
             title = news.get('title', 'No title')
             snippet = news.get('snippet', '')[:200]
-            formatted.append(f"{i}. {title}\n   {snippet}")
+            url = news.get('url', 'No URL')
+            formatted.append(f"{i}. {title}\n   URL: {url}\n   {snippet}")
         
         return "\n".join(formatted)
 
@@ -163,7 +240,7 @@ class OpenAIProvider(AIProvider):
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are a professional business analyst."},
+                    {"role": "system", "content": "You are a professional business analyst specializing in market research and strategic analysis."},
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=1024,
@@ -191,31 +268,46 @@ class GeminiProvider(AIProvider):
             import google.generativeai as genai
             genai.configure(api_key=self.api_key)
             self.client = genai.GenerativeModel(self.model)
-        except ImportError:
+            print(f"✅ Gemini client initialized successfully with model: {self.model}")
+        except ImportError as e:
+            print(f"❌ Import error: {e}")
             raise ImportError("google-generativeai package is required. Install it with: pip install google-generativeai")
+        except Exception as e:
+            print(f"❌ Failed to initialize Gemini: {str(e)}")
+            raise Exception(f"Failed to initialize Gemini client: {str(e)}")
     
     def generate_content(self, section: str, company_name: str, recent_news: Optional[List[Dict]] = None) -> str:
         """Generate content using Google Gemini API"""
         try:
+            if not hasattr(self, 'client') or self.client is None:
+                return f"Error: Gemini client not initialized. Check your API key and model configuration."
+            
             prompts = self._get_prompts(company_name, recent_news)
             prompt = prompts.get(section, f"Generate information about {company_name}")
             
             response = self.client.generate_content(prompt)
-            return response.text
+            
+            if response and hasattr(response, 'text'):
+                return response.text
+            else:
+                return f"Error: No response from Gemini API for {section}"
+                
         except Exception as e:
-            return f"Error generating {section}: {str(e)}"
+            error_msg = f"Error generating {section}: {str(e)}"
+            print(f"❌ {error_msg}")
+            return error_msg
 
 
 def get_ai_provider(provider_name: Optional[str] = None) -> AIProvider:
-    """Factory function to get the appropriate AI provider"""
-    provider = provider_name or Config.AI_PROVIDER
-    provider = provider.lower()
-    
-    if provider == 'claude':
+    """Instantiate the AI provider selected by name."""
+    normalized = (provider_name or Config.AI_PROVIDER or "gemini").strip().lower()
+
+    if normalized in {"claude", "anthropic"}:
         return ClaudeProvider()
-    elif provider == 'openai':
+    if normalized in {"openai", "gpt", "chatgpt"}:
         return OpenAIProvider()
-    elif provider == 'gemini':
+    if normalized in {"gemini", "google", "google-gemini"}:
         return GeminiProvider()
-    else:
-        raise ValueError(f"Unknown AI provider: {provider}. Must be one of: claude, openai, gemini")
+
+    valid = ", ".join(Config.VALID_PROVIDERS)
+    raise ValueError(f"Unsupported AI provider: '{provider_name}'. Choose one of: {valid}")

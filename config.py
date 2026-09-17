@@ -6,6 +6,7 @@ Loads and manages environment variables from .env file
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+load_dotenv()
 
 # Load environment variables from .env file
 env_path = Path(__file__).parent / '.env'
@@ -29,7 +30,7 @@ class Config:
     # Default models for each provider
     CLAUDE_MODEL = 'claude-3-haiku-20240307'  # Fast and cost-effective
     OPENAI_MODEL = 'gpt-4o-mini'              # Fast and cost-effective
-    GEMINI_MODEL = 'gemini-3.6-flash'         # Current Gemini model
+    GEMINI_MODEL = 'gemini-3.6-flash'          # Supported Gemini model for Google AI Studio
     
     # ============================================
     # STREAMLIT CONFIGURATION
